@@ -169,6 +169,7 @@ function ToolCallDisplay({ toolCall }) {
   const toolInput = toolCall.input || toolCall.arguments || toolCall.parameters || {};
   const toolOutput = toolCall.output || toolCall.result || null;
   const toolStatus = toolCall.status || (toolOutput ? 'completed' : 'pending');
+  const isRunning = toolStatus === 'running';
 
   const formatJson = (obj) => {
     try {
@@ -181,28 +182,81 @@ function ToolCallDisplay({ toolCall }) {
     }
   };
 
+  const formatCompactParams = (input, maxLength = 80) => {
+    if (!input || typeof input !== 'object') return '';
+    const entries = Object.entries(input);
+    if (entries.length === 0) return '';
+
+    const formatValue = (val) => {
+      if (typeof val === 'string') {
+        return val.length > 20 ? `"${val.substring(0, 20)}..."` : `"${val}"`;
+      }
+      if (typeof val === 'object') {
+        return '{...}';
+      }
+      return String(val);
+    };
+
+    const parts = entries.map(([key, val]) => `${key}=${formatValue(val)}`);
+    let result = parts.join(', ');
+
+    if (result.length > maxLength) {
+      result = result.substring(0, maxLength - 3) + '...';
+    }
+
+    return `(${result})`;
+  };
+
+  const getStatusIcon = () => {
+    switch (toolStatus) {
+      case 'completed':
+        return '\u2713';
+      case 'error':
+        return '\u2717';
+      case 'running':
+        return null; // Will use CSS spinner
+      default:
+        return '\u2022';
+    }
+  };
+
   return (
-    <div className="tool-call">
+    <div className={`tool-call ${isRunning ? 'tool-call-running' : ''}`}>
       <div
         className="tool-call-header"
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <span className={`tool-call-status tool-call-status-${toolStatus}`}>
-          {toolStatus === 'completed' ? '\u2713' : toolStatus === 'error' ? '\u2717' : '\u2022'}
+          {isRunning ? <span className="tool-call-spinner" /> : getStatusIcon()}
         </span>
-        <span className="tool-call-name">{toolName}</span>
+        <span className="tool-call-name">
+          <span>
+            {toolName}
+            {isRunning && <span className="tool-call-running-text">Running...</span>}
+          </span>
+          {Object.keys(toolInput).length > 0 && (
+            <span className="tool-call-params">{formatCompactParams(toolInput)}</span>
+          )}
+        </span>
         <span className="tool-call-toggle">{isExpanded ? '\u25BC' : '\u25B6'}</span>
       </div>
       {isExpanded && (
         <div className="tool-call-details">
-          <div className="tool-call-section">
-            <div className="tool-call-section-title">Input</div>
-            <pre className="tool-call-json">{formatJson(toolInput)}</pre>
-          </div>
+          {Object.keys(toolInput).length > 0 && (
+            <div className="tool-call-section">
+              <div className="tool-call-section-title">Input</div>
+              <pre className="tool-call-json">{formatJson(toolInput)}</pre>
+            </div>
+          )}
           {toolOutput && (
             <div className="tool-call-section">
               <div className="tool-call-section-title">Output</div>
               <pre className="tool-call-json">{formatJson(toolOutput)}</pre>
+            </div>
+          )}
+          {isRunning && (
+            <div className="tool-call-section">
+              <div className="tool-call-running-message">Waiting for result...</div>
             </div>
           )}
         </div>
@@ -389,6 +443,15 @@ export default function ChatMessages({ messages, isLoading }) {
           <div className="chat-message-role">
             {message.role === MESSAGE_ROLE.USER ? 'You' : 'Assistant'}
           </div>
+          {message.isLoading && (
+            <div className="chat-message-loading">
+              <span className="typing-indicator">
+                <span></span>
+                <span></span>
+                <span></span>
+              </span>
+            </div>
+          )}
           {message.content && (
             <div className="chat-message-content">
               <ContentWithCitations

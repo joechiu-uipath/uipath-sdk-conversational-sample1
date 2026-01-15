@@ -231,8 +231,6 @@ export default function App() {
     setIsSending(true);
 
     const userMessageId = `temp-user-${Date.now()}`;
-    const assistantMessageId = `temp-assistant-${Date.now()}`;
-    const contentRef = { current: '' };
 
     const userMessage = {
       id: userMessageId,
@@ -242,38 +240,139 @@ export default function App() {
       citations: [],
     };
 
-    const assistantMessage = {
-      id: assistantMessageId,
+    // Add a placeholder for the first assistant message
+    const placeholderMessageId = `temp-assistant-${Date.now()}`;
+    const placeholderMessage = {
+      id: placeholderMessageId,
       role: MESSAGE_ROLE.ASSISTANT,
       content: '',
       toolCalls: [],
       citations: [],
+      isLoading: true,
     };
 
-    setMessages((prev) => [...prev, userMessage, assistantMessage]);
+    setMessages((prev) => [...prev, userMessage, placeholderMessage]);
+
+    // Track message state per message ID
+    const messageStateMap = {};
+
+    const getOrCreateMessageState = (messageId) => {
+      if (!messageStateMap[messageId]) {
+        messageStateMap[messageId] = {
+          content: '',
+          toolCalls: [],
+        };
+      }
+      return messageStateMap[messageId];
+    };
+
+    const updateMessage = (messageId, updates) => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId
+            ? { ...msg, ...updates }
+            : msg
+        )
+      );
+    };
+
+    const addOrUpdateMessage = (messageId, role, updates) => {
+      setMessages((prev) => {
+        const existingIndex = prev.findIndex((msg) => msg.id === messageId);
+        if (existingIndex >= 0) {
+          // Update existing message
+          return prev.map((msg) =>
+            msg.id === messageId
+              ? { ...msg, ...updates }
+              : msg
+          );
+        } else {
+          // Remove placeholder and add new message
+          const withoutPlaceholder = prev.filter((msg) => msg.id !== placeholderMessageId);
+          return [
+            ...withoutPlaceholder,
+            {
+              id: messageId,
+              role,
+              content: '',
+              toolCalls: [],
+              citations: [],
+              ...updates,
+            },
+          ];
+        }
+      });
+    };
 
     try {
       const exchange = sessionHelperRef.current.startExchange();
 
       exchange.onMessageStart((message) => {
-        if (message.startEvent.role === MESSAGE_ROLE.ASSISTANT) {
+        const messageId = message.startEvent.messageId || `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        const role = message.startEvent.role;
+
+        if (role === MESSAGE_ROLE.ASSISTANT) {
+          const state = getOrCreateMessageState(messageId);
+
+          // Create the message entry (replaces placeholder on first message)
+          addOrUpdateMessage(messageId, role, { isLoading: true });
+
           message.onContentPartStart((contentPart) => {
             contentPart.onChunk((chunk) => {
-              contentRef.current += chunk.data || '';
-              const newContent = contentRef.current;
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === assistantMessageId
-                    ? { ...msg, content: newContent }
-                    : msg
-                )
+              state.content += chunk.data || '';
+              addOrUpdateMessage(messageId, role, {
+                content: state.content,
+                toolCalls: state.toolCalls,
+                isLoading: false,
+              });
+            });
+          });
+
+          message.onToolCallStart((toolCall) => {
+            const { toolCallId, toolName, input } = toolCall.startEvent;
+            const newToolCall = {
+              id: toolCallId,
+              toolCallId,
+              name: toolName,
+              input: input || {},
+              status: 'running',
+              output: null,
+              isError: false,
+            };
+            state.toolCalls = [...state.toolCalls, newToolCall];
+            addOrUpdateMessage(messageId, role, {
+              content: state.content,
+              toolCalls: [...state.toolCalls],
+              isLoading: false,
+            });
+
+            toolCall.onToolCallEnd((endEvent) => {
+              const { isError, output } = endEvent;
+              state.toolCalls = state.toolCalls.map((tc) =>
+                tc.toolCallId === toolCallId
+                  ? { ...tc, status: isError ? 'error' : 'completed', output, isError }
+                  : tc
               );
+              addOrUpdateMessage(messageId, role, {
+                content: state.content,
+                toolCalls: [...state.toolCalls],
+              });
+            });
+          });
+
+          message.onMessageEnd?.(() => {
+            addOrUpdateMessage(messageId, role, {
+              content: state.content,
+              toolCalls: state.toolCalls,
+              isLoading: false,
             });
           });
         }
       });
 
       exchange.onExchangeEnd(() => {
+        // Remove placeholder if it still exists (no messages were received)
+        setMessages((prev) => prev.filter((msg) => msg.id !== placeholderMessageId));
         setIsSending(false);
       });
 
@@ -283,7 +382,7 @@ export default function App() {
     } catch (error) {
       console.error('Failed to send message:', error);
       setIsSending(false);
-      setMessages((prev) => prev.filter((msg) => msg.id !== assistantMessageId));
+      setMessages((prev) => prev.filter((msg) => msg.id === userMessageId || !msg.id.startsWith('temp-')));
     }
   };
 
