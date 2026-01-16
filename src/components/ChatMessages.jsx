@@ -2,11 +2,26 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+// Use light build with only needed languages for smaller bundle
+import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import katex from 'katex';
-import 'katex/dist/katex.min.css';
+import html from 'react-syntax-highlighter/dist/esm/languages/prism/markup';
 import { MESSAGE_ROLE, SCROLL_THRESHOLD } from '../constants';
+
+// Register only the languages we need
+SyntaxHighlighter.registerLanguage('html', html);
+
+// Lazy load KaTeX only when needed (large library ~264KB)
+let katexPromise = null;
+const loadKatex = () => {
+  if (!katexPromise) {
+    katexPromise = Promise.all([
+      import('katex'),
+      import('katex/dist/katex.min.css'),
+    ]).then(([katexModule]) => katexModule.default);
+  }
+  return katexPromise;
+};
 
 function parseContentWithSpecialBlocks(content) {
   if (!content || typeof content !== 'string') return [{ type: 'markdown', content: '' }];
@@ -168,22 +183,49 @@ function SandboxedHtml({ html }) {
 }
 
 function RenderedLatex({ latex }) {
+  const [renderedHtml, setRenderedHtml] = useState(null);
   const [error, setError] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const renderedHtml = useMemo(() => {
-    try {
-      setError(null);
-      return katex.renderToString(latex, {
-        displayMode: true,
-        throwOnError: false,
-        errorColor: '#dc2626',
-        trust: true,
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
+
+    loadKatex()
+      .then((katex) => {
+        if (cancelled) return;
+        try {
+          const html = katex.renderToString(latex, {
+            displayMode: true,
+            throwOnError: false,
+            errorColor: '#dc2626',
+            trust: true,
+          });
+          setRenderedHtml(html);
+        } catch (err) {
+          setError(err.message);
+        }
+        setIsLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError('Failed to load KaTeX library');
+        setIsLoading(false);
       });
-    } catch (err) {
-      setError(err.message);
-      return null;
-    }
+
+    return () => {
+      cancelled = true;
+    };
   }, [latex]);
+
+  if (isLoading) {
+    return (
+      <div className="rendered-latex latex-loading">
+        Loading LaTeX...
+      </div>
+    );
+  }
 
   if (error) {
     return (
