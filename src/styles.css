@@ -193,6 +193,48 @@ body {
   margin-right: auto;
   border-bottom-left-radius: 4px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+  position: relative;
+}
+
+/* Message Actions (hover menu) */
+.message-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 100;
+}
+
+.chat-message-assistant:hover .message-actions {
+  opacity: 1;
+}
+
+.message-action-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: #e8e8e8;
+  color: #555;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  padding: 0;
+}
+
+.message-action-btn:hover {
+  background: #d0d0d0;
+  color: #333;
+}
+
+.message-action-btn svg {
+  pointer-events: none;
 }
 
 .chat-message-role {
@@ -351,6 +393,44 @@ body {
   padding: 0;
 }
 
+.chat-message-content table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+  width: 100%;
+  overflow-x: auto;
+  display: block;
+}
+
+.chat-message-content th,
+.chat-message-content td {
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.chat-message-content th {
+  background: rgba(0, 0, 0, 0.06);
+  font-weight: 600;
+}
+
+.chat-message-content tr:nth-child(even) {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.chat-message-user .chat-message-content th,
+.chat-message-user .chat-message-content td {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.chat-message-user .chat-message-content th {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.chat-message-user .chat-message-content tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .chat-message-user .chat-message-content code {
   background: rgba(255, 255, 255, 0.2);
 }
@@ -440,6 +520,80 @@ body {
   border: none;
   background: white;
   display: block;
+}
+
+/* Rendered LaTeX */
+.rendered-latex {
+  margin: 12px 0;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 8px;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.chat-message-user .rendered-latex {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.rendered-latex .katex {
+  font-size: 1.1em;
+}
+
+.rendered-latex .katex-display {
+  margin: 0;
+}
+
+.latex-error {
+  margin: 12px 0;
+  padding: 12px;
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.2);
+  border-radius: 8px;
+}
+
+.chat-message-user .latex-error {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.latex-error-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #dc2626;
+  margin-bottom: 8px;
+}
+
+.chat-message-user .latex-error-title {
+  color: #fca5a5;
+}
+
+.latex-error-message {
+  font-size: 12px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  color: #dc2626;
+  margin: 0 0 8px 0;
+  white-space: pre-wrap;
+}
+
+.chat-message-user .latex-error-message {
+  color: #fca5a5;
+}
+
+.latex-raw {
+  font-size: 12px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  background: rgba(0, 0, 0, 0.05);
+  padding: 8px;
+  border-radius: 4px;
+  margin: 0;
+  white-space: pre-wrap;
+  color: #555;
+}
+
+.chat-message-user .latex-raw {
+  background: rgba(0, 0, 0, 0.15);
+  color: rgba(255, 255, 255, 0.8);
 }
 
 

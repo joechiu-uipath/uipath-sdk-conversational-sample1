@@ -1,20 +1,24 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import katex from 'katex';
+import 'katex/dist/katex.min.css';
 import { MESSAGE_ROLE, SCROLL_THRESHOLD } from '../constants';
 
-function parseContentWithHtmlBlocks(content) {
+function parseContentWithSpecialBlocks(content) {
   if (!content || typeof content !== 'string') return [{ type: 'markdown', content: '' }];
 
   const parts = [];
-  const htmlBlockRegex = /```html\s*\n([\s\S]*?)```/gi;
+  // Match both ```html and ```latex blocks
+  const specialBlockRegex = /```(html|latex)\s*\n([\s\S]*?)```/gi;
   let lastIndex = 0;
   let match;
 
-  while ((match = htmlBlockRegex.exec(content)) !== null) {
-    // Add markdown content before this HTML block
+  while ((match = specialBlockRegex.exec(content)) !== null) {
+    // Add markdown content before this block
     if (match.index > lastIndex) {
       const mdContent = content.slice(lastIndex, match.index).trim();
       if (mdContent) {
@@ -22,16 +26,17 @@ function parseContentWithHtmlBlocks(content) {
       }
     }
 
-    // Add the HTML block
-    const htmlContent = match[1].trim();
-    if (htmlContent) {
-      parts.push({ type: 'html', content: htmlContent });
+    // Add the special block (html or latex)
+    const blockType = match[1].toLowerCase();
+    const blockContent = match[2].trim();
+    if (blockContent) {
+      parts.push({ type: blockType, content: blockContent });
     }
 
     lastIndex = match.index + match[0].length;
   }
 
-  // Add remaining markdown content after the last HTML block
+  // Add remaining markdown content after the last special block
   if (lastIndex < content.length) {
     const mdContent = content.slice(lastIndex).trim();
     if (mdContent) {
@@ -39,7 +44,7 @@ function parseContentWithHtmlBlocks(content) {
     }
   }
 
-  // If no HTML blocks found, return original content as markdown
+  // If no special blocks found, return original content as markdown
   if (parts.length === 0) {
     return [{ type: 'markdown', content }];
   }
@@ -159,6 +164,42 @@ function SandboxedHtml({ html }) {
         />
       )}
     </div>
+  );
+}
+
+function RenderedLatex({ latex }) {
+  const [error, setError] = useState(null);
+
+  const renderedHtml = useMemo(() => {
+    try {
+      setError(null);
+      return katex.renderToString(latex, {
+        displayMode: true,
+        throwOnError: false,
+        errorColor: '#dc2626',
+        trust: true,
+      });
+    } catch (err) {
+      setError(err.message);
+      return null;
+    }
+  }, [latex]);
+
+  if (error) {
+    return (
+      <div className="latex-error">
+        <div className="latex-error-title">LaTeX Error</div>
+        <pre className="latex-error-message">{error}</pre>
+        <pre className="latex-raw">{latex}</pre>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="rendered-latex"
+      dangerouslySetInnerHTML={{ __html: renderedHtml }}
+    />
   );
 }
 
@@ -383,20 +424,61 @@ function ContentWithCitations({ content, citations, messageId }) {
 
   return (
     <>
-      {parseContentWithHtmlBlocks(processedContent).map((part, partIndex) => (
-        part.type === 'html' ? (
-          <SandboxedHtml key={partIndex} html={part.content} />
-        ) : (
+      {parseContentWithSpecialBlocks(processedContent).map((part, partIndex) => {
+        if (part.type === 'html') {
+          return <SandboxedHtml key={partIndex} html={part.content} />;
+        }
+        if (part.type === 'latex') {
+          return <RenderedLatex key={partIndex} latex={part.content} />;
+        }
+        return (
           <Markdown
             key={partIndex}
             components={components}
+            remarkPlugins={[remarkGfm]}
             rehypePlugins={[rehypeRaw]}
           >
             {part.content}
           </Markdown>
-        )
-      ))}
+        );
+      })}
     </>
+  );
+}
+
+function MessageActions({ content }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
+  return (
+    <div className="message-actions">
+      <button
+        type="button"
+        className="message-action-btn"
+        onClick={handleCopy}
+        title={copied ? 'Copied!' : 'Copy message'}
+      >
+        {copied ? (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+        ) : (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+        )}
+      </button>
+    </div>
   );
 }
 
@@ -514,6 +596,9 @@ export default function ChatMessages({ messages, isLoading }) {
                 />
               ))}
             </div>
+          )}
+          {message.role === MESSAGE_ROLE.ASSISTANT && message.content && (
+            <MessageActions content={message.content} />
           )}
         </div>
       ))}
