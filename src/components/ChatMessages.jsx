@@ -461,6 +461,37 @@ export default function ChatMessages({ messages, isLoading }) {
               />
             </div>
           )}
+          {message.attachments && message.attachments.length > 0 && (
+            <div className="message-attachment-indicators">
+              {message.attachments.map((attachment, aIndex) => {
+                const mimeType = attachment.mimeType || '';
+                let icon = '📎'; // default
+                if (mimeType === 'application/pdf') {
+                  icon = '📄';
+                } else if (mimeType === 'image/png') {
+                  icon = '🖼️';
+                } else if (mimeType === 'image/jpeg' || mimeType === 'image/jpg') {
+                  icon = '🖼️';
+                } else if (mimeType === 'text/plain') {
+                  icon = '📝';
+                } else if (mimeType.startsWith('image/')) {
+                  icon = '🖼️';
+                }
+                return (
+                  <span
+                    key={aIndex}
+                    className={`attachment-indicator ${message.uploadError ? 'upload-failed' : ''}`}
+                    title={attachment.name}
+                  >
+                    {icon}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+          {message.uploadError && (
+            <div className="message-error">{message.uploadError}</div>
+          )}
           {message.citations && message.citations.length > 0 && (
             <div className="citations-container">
               <div className="citations-header">Sources</div>

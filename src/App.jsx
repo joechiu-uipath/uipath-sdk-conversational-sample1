@@ -92,17 +92,33 @@ export default function App() {
       for (const exchange of chronologicalExchanges) {
         if (exchange.messages) {
           for (const msg of exchange.messages) {
-            const content = msg.contentParts
-              ?.map((part) => part.data?.inline || '')
+            // Separate text content parts from attachment content parts
+            const textMimeTypes = ['text/plain', 'text/markdown', 'text/html'];
+            const textParts = msg.contentParts?.filter(
+              (part) => textMimeTypes.includes(part.mimeType) || part.data?.inline
+            ) || [];
+            const attachmentParts = msg.contentParts?.filter(
+              (part) => !textMimeTypes.includes(part.mimeType) && !part.data?.inline && part.mimeType
+            ) || [];
+
+            const content = textParts
+              .map((part) => part.data?.inline || '')
               .join('') || '';
             const citations = msg.contentParts
               ?.flatMap((part) => part.citations || []) || [];
+            const attachments = attachmentParts.map((part) => ({
+              name: part.name || 'Attachment',
+              mimeType: part.mimeType,
+              uri: part.data?.uri,
+            }));
+
             messageList.push({
               id: msg.messageId,
               role: msg.role,
               content,
               toolCalls: msg.toolCalls || [],
               citations,
+              attachments,
             });
           }
         }
@@ -225,7 +241,7 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = async (messageText) => {
+  const handleSendMessage = async (messageText, attachments = []) => {
     if (!sessionHelperRef.current || isSending) return;
 
     setIsSending(true);
@@ -238,6 +254,7 @@ export default function App() {
       content: messageText,
       toolCalls: [],
       citations: [],
+      attachments: attachments.map((a) => ({ name: a.name, mimeType: a.mimeType })),
     };
 
     // Add a placeholder for the first assistant message
@@ -376,9 +393,65 @@ export default function App() {
         setIsSending(false);
       });
 
-      exchange.sendMessageWithContentPart({
-        data: messageText,
-      });
+      // If there are attachments, upload them first and send with attachment content parts
+      if (attachments.length > 0) {
+        try {
+          // Upload all attachments
+          const uploadedAttachments = await Promise.all(
+            attachments.map((attachment) =>
+              conversationalAgentService.conversations.attachments.upload(
+                selectedConversation.conversationId,
+                attachment.file
+              )
+            )
+          );
+
+          // Start a message with multiple content parts
+          const message = exchange.startMessage({ role: 'user' });
+
+          // Send text content part if there's text
+          if (messageText) {
+            await message.sendContentPart({
+              data: messageText,
+              mimeType: 'text/markdown',
+            });
+          }
+
+          // Send attachment content parts
+          for (const uploaded of uploadedAttachments) {
+            message.startContentPart(
+              {
+                mimeType: uploaded.mimeType,
+                name: uploaded.name,
+                externalValue: { uri: uploaded.uri },
+              },
+              async () => {}
+            );
+          }
+
+          // End the message
+          message.sendMessageEnd();
+        } catch (uploadError) {
+          console.error('Failed to upload attachments:', uploadError);
+          // Update user message to show upload failed
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === userMessageId
+                ? { ...msg, uploadError: 'Failed to upload attachments. This may be a CORS issue.' }
+                : msg
+            )
+          );
+          // Remove placeholder and reset sending state
+          setMessages((prev) => prev.filter((msg) => msg.id !== placeholderMessageId));
+          setIsSending(false);
+          return;
+        }
+      } else {
+        // No attachments, send simple message
+        exchange.sendMessageWithContentPart({
+          data: messageText,
+        });
+      }
     } catch (error) {
       console.error('Failed to send message:', error);
       setIsSending(false);
