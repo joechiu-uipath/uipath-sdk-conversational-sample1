@@ -9,7 +9,7 @@ const authConfig = {
   orgName: import.meta.env.VITE_UIPATH_ORG_NAME,
   tenantName: import.meta.env.VITE_UIPATH_TENANT_NAME,
   baseUrl: import.meta.env.VITE_UIPATH_BASE_URL,
-  redirectUri: import.meta.env.VITE_UIPATH_REDIRECT_URI,
+  redirectUri: window.location.origin + window.location.pathname,
   scope: import.meta.env.VITE_UIPATH_SCOPE,
 };
 
