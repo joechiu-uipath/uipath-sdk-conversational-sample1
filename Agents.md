@@ -3,7 +3,9 @@ Please create a React-based chat application using
 
 # App design
 - use this npm package and version in package.json to gain access to the "UiPath Typescript SDK" that contains all necessary functionality to communicate with a conversational agent hosted on the UiPath Platform backend "@uipath/uipath-typescript": "npm:@uipath/uipath-typescript-dev@^1.0.0-beta.1"
-- In .env file, I have defined all the necessary information for OAuth and connecting to the UiPath Platform. I want to use OAuth code authorization flow with PKCE to obtain the token to use with UiPath platform.
+- In .env file, I have defined all the necessary information for OAuth and connecting to the UiPath Platform. I want to use OAuth code authorization flow with PKCE to obtain the token to use with UiPath platform. Pass in app base URL as redirect URL as our app would handle returned token.
+- Use vite as build tool, wthe .env file contains a set of VITE_ prefixed variables that would be injected into the app in runtime
+- Due to the OAuth configuration, the dev server needs to serve the test site at port 5173
 - the App is a React chat application built in using javascript
 - The app should provide an initial sign in screen that user can use to perform OAuth sign in flow.
 - Once signed in, the chat application has a few key UI area
@@ -40,7 +42,7 @@ const authConfig: UiPathSDKConfig = {
   orgName: import.meta.env.VITE_UIPATH_ORG_NAME,
   tenantName: import.meta.env.VITE_UIPATH_TENANT_NAME,
   baseUrl: import.meta.env.VITE_UIPATH_BASE_URL,
-  redirectUri: import.meta.env.VITE_UIPATH_REDIRECT_URI,
+  redirectUri: window.location.origin + window.location.pathname,
   scope: import.meta.env.VITE_UIPATH_SCOPE,
 };
 
@@ -90,6 +92,33 @@ const folderAgents = await conversationalAgentService.agents.getAll(folderId);
 const agentDetails = await conversationalAgentService.agents.getById(folderId, agentId);
 ```
 
+Sample response Agents API response
+
+```
+[
+    {
+        "id": 552774,
+        "name": "Apple Genius Agent",
+        "description": "This agent has information about Apple Inc and its founder Steve Jobs.",
+        "processVersion": "1.0.0",
+        "processKey": "CAS.Test.Suite.agent.Apple.Genius.Agent",
+        "folderId": 2097047,
+        "feedId": "66001d92-ad5c-47e3-a60a-430eb50c2122",
+        "createdAt": "2025-08-14T19:38:50.923Z"
+    },
+    {
+        "id": 552775,
+        "name": "Friend Agent",
+        "description": "",
+        "processVersion": "1.0.0",
+        "processKey": "CAS.Test.Suite.agent.Friend.Agent",
+        "folderId": 2097047,
+        "feedId": "66001d92-ad5c-47e3-a60a-430eb50c2122",
+        "createdAt": "2025-08-14T19:38:50.937Z"
+    }
+]
+```
+
 ### Conversations API
 
 ```
@@ -117,6 +146,67 @@ const updated = await conversationalAgentService.conversations.update(conversati
 
 // Delete conversation
 await conversationalAgentService.conversations.remove(conversationId);
+```
+
+Sample Conversations API response
+
+```
+{
+    "items": [
+        {
+            "conversationId": "5cc9bf65-a1a9-40e3-8ae4-0c7742cef574",
+            "createdAt": "2026-01-16T20:59:27.820Z",
+            "updatedAt": "2026-01-16T21:19:43.773Z",
+            "lastActivityAt": "2026-01-16T21:19:41.350Z",
+            "label": "Calculating 30-Year Fixed Mortgage Formula",
+            "autogenerateLabel": true,
+            "userId": "7BAC08D0-DB97-4EA0-9FAB-7974733DB96A",
+            "orgId": "9568BEBA-50A8-49D1-801E-F2D1711089FD",
+            "tenantId": "86011AFE-5252-4E44-8805-B3430072D040",
+            "folderId": 2097047,
+            "agentReleaseId": 552775,
+            "traceId": "fffed4e7-f9d6-474c-88c5-52709449a412",
+            "spanId": "46f6f4f6-d438-4d09-82bb-3e7e0a1ac00e",
+            "jobKey": "42D8D157-D236-4434-841B-396776F87993",
+            "isLocalJobExecution": false
+        },
+        {
+            "conversationId": "0454eab3-827f-4d4d-a2dc-6f2dc721caf1",
+            "createdAt": "2026-01-16T20:57:57.907Z",
+            "updatedAt": "2026-01-16T20:59:00.223Z",
+            "lastActivityAt": "2026-01-16T20:58:58.913Z",
+            "label": "Spider-Man Introduction with Markdown Format",
+            "autogenerateLabel": true,
+            "userId": "7BAC08D0-DB97-4EA0-9FAB-7974733DB96A",
+            "orgId": "9568BEBA-50A8-49D1-801E-F2D1711089FD",
+            "tenantId": "86011AFE-5252-4E44-8805-B3430072D040",
+            "folderId": 2097047,
+            "agentReleaseId": 552775,
+            "traceId": "75fc3b36-9e48-4086-8364-587c778142cc",
+            "spanId": "40b18d8b-32d0-430c-ab60-6270a5a2a97f",
+            "jobKey": "00280173-65B1-4AC8-B275-E1A14916DE2B",
+            "isLocalJobExecution": false
+        },
+        {
+            "conversationId": "763fd3e0-dadf-4915-8bdb-a07f033426e0",
+            "createdAt": "2026-01-16T20:57:57.000Z",
+            "updatedAt": "2026-01-16T20:57:58.130Z",
+            "lastActivityAt": "2026-01-16T20:57:57.007Z",
+            "label": "New Conversation",
+            "autogenerateLabel": true,
+            "userId": "7BAC08D0-DB97-4EA0-9FAB-7974733DB96A",
+            "orgId": "9568BEBA-50A8-49D1-801E-F2D1711089FD",
+            "tenantId": "86011AFE-5252-4E44-8805-B3430072D040",
+            "folderId": 2097047,
+            "agentReleaseId": 552775,
+            "traceId": "a0efc524-eff0-4a5d-a4af-461905017ab1",
+            "spanId": "6b40bc5e-00df-4c18-be4f-0789a1935d68",
+            "jobKey": "16A89276-BFA3-48D4-9ADB-F3BD11BB27C6",
+            "isLocalJobExecution": false
+        }
+    ]
+}
+
 ```
 
 ### Real-Time Chat with WebSocket Events
@@ -196,6 +286,8 @@ message.sendMessageEnd();
 
 ### Exchanges API (Chat History)
 
+Maximum exchange limit is 20, do not use a higher value.
+
 ```
 // Get all exchanges in a conversation
 const exchanges = await conversationalAgentService.conversations.exchanges.getAll(
@@ -217,6 +309,67 @@ await conversationalAgentService.conversations.exchanges.createFeedback(
   { rating: 'positive', comment: 'Great response!' }
 );
 ```
+
+Sample Exchange API response
+
+```
+{
+    "items": [
+        {
+            "exchangeId": "EC7F6EFA-121A-4953-B263-9171770C66EB",
+            "spanId": "daf72a0a-b89f-4613-b98c-c2ce1bedc465",
+            "createdAt": "2026-01-16T20:58:47.498Z",
+            "updatedAt": "2026-01-16T20:58:47.707Z",
+            "messages": [
+                {
+                    "messageId": "BEFCD5C4-B150-4A94-BC97-A020B203FDE3",
+                    "role": "user",
+                    "toolCalls": [],
+                    "interrupts": [],
+                    "spanId": "5e555377-5dcf-4e9f-90aa-daa82c31bfc2",
+                    "createdAt": "2026-01-16T20:58:47.513Z",
+                    "updatedAt": "2026-01-16T20:58:47.513Z",
+                    "contentParts": [
+                        {
+                            "contentPartId": "5CE0DF01-2455-49BB-AAA1-5AEEAF82693D",
+                            "mimeType": "text/markdown",
+                            "data": {
+                                "inline": "use Mardown as much as possible to make a well formatted, short introduction of Spiderman, include a markdown table."
+                            },
+                            "citations": [],
+                            "createdAt": "2026-01-16T20:58:47.561Z",
+                            "updatedAt": "2026-01-16T20:58:47.561Z"
+                        }
+                    ]
+                },
+                {
+                    "messageId": "d1800910-6cfd-436a-8b89-b13e15ebce98",
+                    "role": "assistant",
+                    "toolCalls": [],
+                    "interrupts": [],
+                    "spanId": "154af6a5-c3ca-48c3-81f8-e6852ab4b52c",
+                    "createdAt": "2026-01-16T20:58:51.500Z",
+                    "updatedAt": "2026-01-16T20:58:51.500Z",
+                    "contentParts": [
+                        {
+                            "contentPartId": "3f801d13-1175-4f61-9c36-cca735efe1bb",
+                            "mimeType": "text/markdown",
+                            "data": {
+                                "inline": "Certainly! I'd be happy to create a well-formatted, short introduction of Spider-Man using Markdown, including a table. Here's what I've put together for you:\n\n# Spider-Man: Your Friendly Neighborhood Superhero\n\n## Introduction\n\nSpider-Man, created by Stan Lee and Steve Ditko, is one of Marvel Comics' most beloved superheroes. First appearing in 1962, Peter Parker's alter ego has become a cultural icon, inspiring numerous comics, movies, TV shows, and video games.\n\n## Key Information\n\n| Aspect | Details |\n|--------|---------|\n| Real Name | Peter Benjamin Parker |\n| Created by | Stan Lee and Steve Ditko |\n| First Appearance | Amazing Fantasy #15 (August 1962) |\n| Powers | Superhuman strength, speed, agility; wall-crawling; \"spider-sense\" |\n| Occupation | Photographer, scientist, student |\n| Affiliations | Avengers, Fantastic Four (occasional) |\n\n## Notable Characteristics\n\n- **Origin**: Bitten by a radioactive spider, gaining superhuman abilities\n- **Motto**: \"With great power comes great responsibility\"\n- **Costume**: Iconic red and blue suit with web patterns\n- **Equipment**: Web-shooters for swinging and combat\n\nSpider-Man's relatable struggles as Peter Parker, combined with his witty humor and unwavering sense of responsibility, have made him one of the most enduring and popular superheroes of all time."
+                            },
+                            "citations": [],
+                            "isTranscript": false,
+                            "createdAt": "2026-01-16T20:58:58.625Z",
+                            "updatedAt": "2026-01-16T20:58:58.625Z"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
+```
+
 ### User Settings API
 
 ```
@@ -270,7 +423,7 @@ conversationalAgentService.disconnect();
 | Package not found | Ensure .npmrc is in the correct directory (samples/process-app)
 | Token expired | Generate a new PAT token and update .npmrc
 | Authentication errors in app | Verify your .env file has correct UiPath credentials
-| Redirect URI mismatch | Ensure VITE_UIPATH_REDIRECT_URI matches the URL registered in External Applications
+| Redirect URI mismatch | Ensure app base URL matches the URL registered in External Applications
 | Scope errors | Verify the required scopes are granted to your External Application
 | WebSocket connection failed | Check network connectivity and ensure ConversationalAgents scope is granted
 
