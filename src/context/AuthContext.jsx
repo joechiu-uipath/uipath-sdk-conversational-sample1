@@ -76,9 +76,6 @@ export function AuthProvider({ children }) {
   };
 
   const signOut = () => {
-    if (conversationalAgentService) {
-      conversationalAgentService.disconnect();
-    }
     setIsAuthenticated(false);
     setConversationalAgentService(null);
   };

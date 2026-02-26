@@ -5,24 +5,28 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "build:analyze": "vite build && echo Bundle analysis available at dist/bundle-stats.html",
+    "typecheck": "tsc",
+    "build": "tsc && vite build",
+    "build:analyze": "tsc && vite build && echo Bundle analysis available at dist/bundle-stats.html",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@uipath/uipath-typescript": "npm:@uipath/uipath-typescript-dev@^1.0.0-beta.1",
-    "katex": "^0.16.27",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
+    "@uipath/uipath-typescript": "^1.1.1",
+    "katex": "^0.16.33",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^16.1.0",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.2.1",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.7.0",
     "rollup-plugin-visualizer": "^6.0.5",
     "terser": "^5.46.0",
-    "vite": "^5.0.0"
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21"
   }
 }

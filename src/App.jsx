@@ -11,6 +11,94 @@ import {
   DEFAULT_CONVERSATION_LABEL,
 } from './constants';
 
+// ─── State update helpers (match reference sample exactly) ───
+
+function updateMessage(setMessages, id, updates) {
+  setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...updates } : m)));
+}
+
+function updateMessageWith(setMessages, id, updater) {
+  setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...updater(m) } : m)));
+}
+
+// ─── Assistant message handler setup (match reference sample exactly) ───
+// Called once per assistant message. Each call gets its own fresh contentState.
+// Multiple calls for the same exchange all target the same assistantMessageId.
+
+function setupAssistantHandlers(message, assistantMessageId, setMessages) {
+  const contentState = { fullContent: '' };
+
+  // Tool calls — append to existing array from React state
+  message.onToolCallStart((toolCall) => {
+    const info = {
+      id: toolCall.toolCallId,
+      toolCallId: toolCall.toolCallId,
+      name: toolCall.startEvent.toolName,
+      input: toolCall.startEvent.input || {},
+      status: 'running',
+      output: null,
+      isError: false,
+    };
+    updateMessageWith(setMessages, assistantMessageId, (m) => ({
+      toolCalls: [...(m.toolCalls || []), info],
+      isLoading: false,
+    }));
+
+    toolCall.onToolCallEnd(({ isError, output }) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantMessageId
+            ? {
+                ...m,
+                toolCalls: (m.toolCalls || []).map((tc) =>
+                  tc.toolCallId === toolCall.toolCallId
+                    ? { ...tc, status: isError ? 'error' : 'completed', output, isError }
+                    : tc
+                ),
+              }
+            : m
+        )
+      );
+    });
+  });
+
+  // Content parts — stream text chunks, finalize with citations on completed
+  // Match reference: check part.isText, part.isMarkdown, and mimeType for text/html
+  message.onContentPartStart((part) => {
+    const mimeType = part.startEvent?.mimeType;
+    const isTextContent = mimeType === 'text/html' || part.isText || part.isMarkdown
+      || (mimeType && mimeType.startsWith('text/'));
+    if (!isTextContent) return;
+
+    part.onChunk(({ data, citation }) => {
+      contentState.fullContent += data || '';
+      updateMessage(setMessages, assistantMessageId, {
+        content: contentState.fullContent,
+        isLoading: false,
+      });
+    });
+
+    if (part.onCompleted) {
+      part.onCompleted((completed) => {
+        const citations = (completed.citations || []).map((c) => ({
+          citationId: c.citationId,
+          offset: c.offset,
+          length: c.length,
+          sources: c.sources,
+        }));
+        updateMessageWith(setMessages, assistantMessageId, (m) => ({
+          content: contentState.fullContent,
+          isLoading: false,
+          citations: citations.length > 0 ? citations : m.citations,
+        }));
+      });
+    }
+  });
+
+  // NOTE: No onMessageEnd handler — matches the reference sample exactly.
+  // Content is finalized by onCompleted. isLoading is managed by onChunk/onCompleted.
+}
+
 export default function App() {
   const { isAuthenticated, isLoading: authLoading, conversationalAgentService } = useAuth();
 
@@ -24,15 +112,24 @@ export default function App() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSending, setIsSending] = useState(false);
 
-  const sessionHelperRef = useRef(null);
-  const sessionStartedRef = useRef(false);
+  // Session and conversation refs — independent of React render cycle
+  const sessionRef = useRef(null);
+  const sessionPromiseRef = useRef(null);
+  const currentConversationIdRef = useRef(null);
+  // Stores the conversation OBJECT (from getById) for bound methods like startSession/endSession
+  const conversationObjRef = useRef(null);
+
+  // Maps exchangeId -> assistantMessageId (pre-registered before startExchange)
+  const exchangeAssistantIdRef = useRef(new Map());
+
+  // ─── Data loading ───
 
   const loadAgents = useCallback(async () => {
     if (!conversationalAgentService) return;
 
     setIsLoadingAgents(true);
     try {
-      const agentsList = await conversationalAgentService.agents.getAll();
+      const agentsList = await conversationalAgentService.getAll();
       setAgents(agentsList);
     } catch (error) {
       console.error('Failed to load agents:', error);
@@ -48,25 +145,16 @@ export default function App() {
     try {
       const response = await conversationalAgentService.conversations.getAll({
         sort: SORT_ORDER.DESCENDING,
-        limit: CONVERSATION_FETCH_LIMIT,
+        pageSize: CONVERSATION_FETCH_LIMIT,
       });
-      console.log('Conversations response:', response);
-      console.log('Selected agent:', selectedAgent);
       const allConversations = Array.isArray(response) ? response : (response?.items || response?.data || []);
-
-      // Log first conversation to see its structure
-      if (allConversations.length > 0) {
-        console.log('Sample conversation object:', allConversations[0]);
-      }
 
       // Filter conversations by selected agent
       const filteredConversations = allConversations.filter(conv => {
-        // Try different possible property names for agent ID
         const convAgentId = conv.agentId || conv.agentReleaseId || conv.agent?.id;
         return convAgentId === selectedAgent.id;
       });
 
-      console.log('Filtered conversations:', filteredConversations.length, 'of', allConversations.length);
       setConversations(filteredConversations);
     } catch (error) {
       console.error('Failed to load conversations:', error);
@@ -80,19 +168,19 @@ export default function App() {
 
     setIsLoadingMessages(true);
     try {
-      const response = await conversationalAgentService.conversations.exchanges.getAll(
-        selectedConversation.conversationId
-      );
-      console.log('Exchanges response:', response);
+      const conversationId = selectedConversation.id || selectedConversation.conversationId;
+      const conversation = await conversationalAgentService.conversations.getById(conversationId);
+      const response = await conversation.exchanges.getAll({
+        exchangeSort: 'ascending',
+        messageSort: 'ascending',
+        pageSize: 20,
+      });
 
       const exchanges = Array.isArray(response) ? response : (response?.items || response?.data || []);
-      // Reverse to get chronological order (older first, newer last)
-      const chronologicalExchanges = [...exchanges].reverse();
       const messageList = [];
-      for (const exchange of chronologicalExchanges) {
+      for (const exchange of exchanges) {
         if (exchange.messages) {
           for (const msg of exchange.messages) {
-            // Separate text content parts from attachment content parts
             const textMimeTypes = ['text/plain', 'text/markdown', 'text/html'];
             const textParts = msg.contentParts?.filter(
               (part) => textMimeTypes.includes(part.mimeType) || part.data?.inline
@@ -131,50 +219,112 @@ export default function App() {
     }
   }, [conversationalAgentService, selectedConversation]);
 
-  const startSession = useCallback(async () => {
-    if (!conversationalAgentService || !selectedConversation) return;
+  // ─── Session management ───
 
-    if (sessionHelperRef.current) {
-      return;
+  const endCurrentSession = useCallback(() => {
+    if (sessionRef.current && conversationObjRef.current) {
+      try {
+        conversationObjRef.current.endSession();
+      } catch (e) {
+        console.error('Error ending session:', e);
+      }
+    }
+    sessionRef.current = null;
+    sessionPromiseRef.current = null;
+    currentConversationIdRef.current = null;
+    conversationObjRef.current = null;
+    exchangeAssistantIdRef.current.clear();
+  }, []);
+
+  const ensureSession = useCallback(async () => {
+    // If session already exists and is ready, return it
+    if (sessionRef.current) return sessionRef.current;
+
+    // If session creation is in progress, wait for it
+    if (sessionPromiseRef.current) return sessionPromiseRef.current;
+
+    const conversationId = currentConversationIdRef.current;
+    if (!conversationalAgentService || !conversationId) {
+      throw new Error('Cannot create session: missing service or conversation');
     }
 
-    try {
-      const session = conversationalAgentService.events.startSession({
-        conversationId: selectedConversation.conversationId,
+    sessionPromiseRef.current = (async () => {
+      // Match reference: get conversation object, then call bound startSession
+      const conversation = await conversationalAgentService.conversations.getById(conversationId);
+      conversationObjRef.current = conversation;
+      const session = conversation.startSession({ echo: true });
+
+      // Register exchange handler ONCE — handles ALL exchanges via echo
+      // Matches reference: setupExchangeHandlers()
+      session.onExchangeStart((exchange) => {
+        const assistantId = exchangeAssistantIdRef.current.get(exchange.exchangeId);
+        if (!assistantId) return;
+
+        exchange.onMessageStart((message) => {
+          if (!message.isAssistant) return;
+          setupAssistantHandlers(message, assistantId, setMessages);
+        });
+
+        exchange.onExchangeEnd(() => {
+          exchangeAssistantIdRef.current.delete(exchange.exchangeId);
+          setIsSending(false);
+        });
+
+        exchange.onErrorStart((err) => {
+          console.error('Exchange error:', err);
+          exchangeAssistantIdRef.current.delete(exchange.exchangeId);
+          setIsSending(false);
+        });
       });
 
-      session.onSessionStarted(() => {
-        console.log('Session started');
+      session.onSessionEnding(() => {
+        console.log('Session ending requested by server');
       });
 
-      session.onErrorStart((error) => {
-        console.error('Session error:', error);
-      });
-
-      session.onLabelUpdated((event) => {
-        console.log('Label updated:', event);
-        const newLabel = event.label || event.data?.label;
-        if (newLabel) {
-          // Update the conversations list
+      session.onLabelUpdated(({ label }) => {
+        if (label) {
           setConversations((prev) =>
-            prev.map((conv) =>
-              conv.conversationId === selectedConversation.conversationId
-                ? { ...conv, label: newLabel }
-                : conv
-            )
-          );
-          // Update the selected conversation
-          setSelectedConversation((prev) =>
-            prev ? { ...prev, label: newLabel } : prev
+            prev.map((conv) => {
+              const convId = conv.id || conv.conversationId;
+              return convId === conversationId ? { ...conv, label } : conv;
+            })
           );
         }
       });
 
-      sessionHelperRef.current = session;
+      // Wait for session to be ready — onErrorStart rejects if session fails
+      await new Promise((resolve, reject) => {
+        session.onSessionStarted(() => {
+          console.log('Session started for conversation:', conversationId);
+          resolve();
+        });
+
+        session.onSessionEnd?.(() => {
+          sessionRef.current = null;
+          sessionPromiseRef.current = null;
+        });
+
+        session.onErrorStart((error) => {
+          console.error('Session error:', error);
+          if (!sessionRef.current) {
+            reject(new Error(error.message || 'Session failed to start'));
+          }
+        });
+      });
+
+      sessionRef.current = session;
+      return session;
+    })();
+
+    try {
+      return await sessionPromiseRef.current;
     } catch (error) {
-      console.error('Failed to start session:', error);
+      sessionPromiseRef.current = null;
+      throw error;
     }
-  }, [conversationalAgentService, selectedConversation]);
+  }, [conversationalAgentService]);
+
+  // ─── Effects ───
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -190,36 +340,29 @@ export default function App() {
     }
   }, [selectedAgent, loadConversations]);
 
+  // Message loading only — session creation is lazy (in handleSendMessage)
   useEffect(() => {
     if (!selectedConversation) return;
-
     loadMessages();
+  }, [selectedConversation, loadMessages]);
 
-    if (sessionStartedRef.current) {
-      return;
-    }
-    sessionStartedRef.current = true;
-    startSession();
-
+  // Cleanup session on unmount
+  useEffect(() => {
     return () => {
-      sessionStartedRef.current = false;
-      if (sessionHelperRef.current) {
-        sessionHelperRef.current.endSession?.();
-        sessionHelperRef.current = null;
-      }
+      endCurrentSession();
     };
-  }, [selectedConversation, loadMessages, startSession]);
+  }, [endCurrentSession]);
+
+  // ─── Event handlers ───
 
   const handleAgentChange = (agent) => {
     setSelectedAgent(agent);
   };
 
   const handleConversationChange = (conversation) => {
-    if (sessionHelperRef.current) {
-      sessionHelperRef.current.endSession?.();
-      sessionHelperRef.current = null;
-    }
-    sessionStartedRef.current = false;
+    endCurrentSession();
+    const conversationId = conversation?.id || conversation?.conversationId || null;
+    currentConversationIdRef.current = conversationId;
     setSelectedConversation(conversation);
   };
 
@@ -227,14 +370,19 @@ export default function App() {
     if (!conversationalAgentService || !selectedAgent) return;
 
     try {
-      const newConversation = await conversationalAgentService.conversations.create({
-        agentReleaseId: selectedAgent.id,
-        folderId: selectedAgent.folderId,
-        label: DEFAULT_CONVERSATION_LABEL,
-        autogenerateLabel: true,
-      });
+      endCurrentSession();
+      const newConversation = await conversationalAgentService.conversations.create(
+        selectedAgent.id,
+        selectedAgent.folderId,
+        {
+          label: DEFAULT_CONVERSATION_LABEL,
+          autogenerateLabel: true,
+        }
+      );
 
       await loadConversations();
+      const conversationId = newConversation.id || newConversation.conversationId;
+      currentConversationIdRef.current = conversationId;
       setSelectedConversation(newConversation);
     } catch (error) {
       console.error('Failed to create conversation:', error);
@@ -242,12 +390,11 @@ export default function App() {
   };
 
   const handleSendMessage = async (messageText, attachments = []) => {
-    if (!sessionHelperRef.current || isSending) return;
+    if (!currentConversationIdRef.current || isSending) return;
 
     setIsSending(true);
 
-    const userMessageId = `temp-user-${Date.now()}`;
-
+    const userMessageId = `user-${Date.now()}`;
     const userMessage = {
       id: userMessageId,
       role: MESSAGE_ROLE.USER,
@@ -257,10 +404,9 @@ export default function App() {
       attachments: attachments.map((a) => ({ name: a.name, mimeType: a.mimeType })),
     };
 
-    // Add a placeholder for the first assistant message
-    const placeholderMessageId = `temp-assistant-${Date.now()}`;
+    const assistantId = `assistant-${Date.now()}`;
     const placeholderMessage = {
-      id: placeholderMessageId,
+      id: assistantId,
       role: MESSAGE_ROLE.ASSISTANT,
       content: '',
       toolCalls: [],
@@ -270,194 +416,74 @@ export default function App() {
 
     setMessages((prev) => [...prev, userMessage, placeholderMessage]);
 
-    // Track message state per message ID
-    const messageStateMap = {};
-
-    const getOrCreateMessageState = (messageId) => {
-      if (!messageStateMap[messageId]) {
-        messageStateMap[messageId] = {
-          content: '',
-          toolCalls: [],
-        };
-      }
-      return messageStateMap[messageId];
-    };
-
-    const updateMessage = (messageId, updates) => {
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === messageId
-            ? { ...msg, ...updates }
-            : msg
-        )
-      );
-    };
-
-    const addOrUpdateMessage = (messageId, role, updates) => {
-      setMessages((prev) => {
-        const existingIndex = prev.findIndex((msg) => msg.id === messageId);
-        if (existingIndex >= 0) {
-          // Update existing message
-          return prev.map((msg) =>
-            msg.id === messageId
-              ? { ...msg, ...updates }
-              : msg
-          );
-        } else {
-          // Remove placeholder and add new message
-          const withoutPlaceholder = prev.filter((msg) => msg.id !== placeholderMessageId);
-          return [
-            ...withoutPlaceholder,
-            {
-              id: messageId,
-              role,
-              content: '',
-              toolCalls: [],
-              citations: [],
-              ...updates,
-            },
-          ];
-        }
-      });
-    };
+    // Pre-register the exchange-to-assistant mapping BEFORE starting the exchange
+    const exchangeId = `exchange-${Date.now()}-${Math.random().toString(36).substr(2, 12)}`;
+    exchangeAssistantIdRef.current.set(exchangeId, assistantId);
 
     try {
-      const exchange = sessionHelperRef.current.startExchange();
+      // Lazy session creation — creates on first send, reuses thereafter
+      const session = await ensureSession();
 
-      exchange.onMessageStart((message) => {
-        const messageId = message.startEvent.messageId || `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        const role = message.startEvent.role;
+      const exchange = session.startExchange({ exchangeId });
 
-        if (role === MESSAGE_ROLE.ASSISTANT) {
-          const state = getOrCreateMessageState(messageId);
+      // NOTE: Do NOT register handlers on exchange here.
+      // All handlers are set up in session.onExchangeStart() (in ensureSession).
+      // echo:true ensures onExchangeStart fires for this client-initiated exchange.
 
-          // Create the message entry (replaces placeholder on first message)
-          addOrUpdateMessage(messageId, role, { isLoading: true });
-
-          message.onContentPartStart((contentPart) => {
-            contentPart.onChunk((chunk) => {
-              state.content += chunk.data || '';
-              addOrUpdateMessage(messageId, role, {
-                content: state.content,
-                toolCalls: state.toolCalls,
-                isLoading: false,
-              });
-            });
-          });
-
-          message.onToolCallStart((toolCall) => {
-            const { toolCallId, toolName, input } = toolCall.startEvent;
-            const newToolCall = {
-              id: toolCallId,
-              toolCallId,
-              name: toolName,
-              input: input || {},
-              status: 'running',
-              output: null,
-              isError: false,
-            };
-            state.toolCalls = [...state.toolCalls, newToolCall];
-            addOrUpdateMessage(messageId, role, {
-              content: state.content,
-              toolCalls: [...state.toolCalls],
-              isLoading: false,
-            });
-
-            toolCall.onToolCallEnd((endEvent) => {
-              const { isError, output } = endEvent;
-              state.toolCalls = state.toolCalls.map((tc) =>
-                tc.toolCallId === toolCallId
-                  ? { ...tc, status: isError ? 'error' : 'completed', output, isError }
-                  : tc
-              );
-              addOrUpdateMessage(messageId, role, {
-                content: state.content,
-                toolCalls: [...state.toolCalls],
-              });
-            });
-          });
-
-          message.onMessageEnd?.(() => {
-            addOrUpdateMessage(messageId, role, {
-              content: state.content,
-              toolCalls: state.toolCalls,
-              isLoading: false,
-            });
-          });
-        }
-      });
-
-      exchange.onExchangeEnd(() => {
-        // Remove placeholder if it still exists (no messages were received)
-        setMessages((prev) => prev.filter((msg) => msg.id !== placeholderMessageId));
-        setIsSending(false);
-      });
-
-      // If there are attachments, upload them first and send with attachment content parts
       if (attachments.length > 0) {
         try {
-          // Upload all attachments
           const uploadedAttachments = await Promise.all(
             attachments.map((attachment) =>
-              conversationalAgentService.conversations.attachments.upload(
-                selectedConversation.conversationId,
-                attachment.file
-              )
+              conversationObjRef.current.uploadAttachment(attachment.file)
             )
           );
 
-          // Start a message with multiple content parts
           const message = exchange.startMessage({ role: 'user' });
 
-          // Send text content part if there's text
           if (messageText) {
-            await message.sendContentPart({
-              data: messageText,
-              mimeType: 'text/markdown',
-            });
+            await message.sendContentPart({ data: messageText });
           }
 
-          // Send attachment content parts
           for (const uploaded of uploadedAttachments) {
-            message.startContentPart(
-              {
-                mimeType: uploaded.mimeType,
-                name: uploaded.name,
-                externalValue: { uri: uploaded.uri },
-              },
-              async () => {}
-            );
+            message.startContentPart({
+              mimeType: uploaded.mimeType,
+              name: uploaded.name,
+              externalValue: { uri: uploaded.uri },
+            }).sendContentPartEnd();
           }
 
-          // End the message
           message.sendMessageEnd();
         } catch (uploadError) {
           console.error('Failed to upload attachments:', uploadError);
-          // Update user message to show upload failed
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === userMessageId
-                ? { ...msg, uploadError: 'Failed to upload attachments. This may be a CORS issue.' }
+                ? { ...msg, uploadError: 'Failed to upload attachments.' }
                 : msg
             )
           );
-          // Remove placeholder and reset sending state
-          setMessages((prev) => prev.filter((msg) => msg.id !== placeholderMessageId));
+          setMessages((prev) => prev.filter((msg) => msg.id !== assistantId));
           setIsSending(false);
+          exchangeAssistantIdRef.current.delete(exchangeId);
           return;
         }
       } else {
-        // No attachments, send simple message
-        exchange.sendMessageWithContentPart({
-          data: messageText,
-        });
+        // Match reference: explicit startMessage + sendContentPart + sendMessageEnd
+        const message = exchange.startMessage({ role: 'user' });
+        await message.sendContentPart({ data: messageText });
+        message.sendMessageEnd();
       }
     } catch (error) {
       console.error('Failed to send message:', error);
       setIsSending(false);
-      setMessages((prev) => prev.filter((msg) => msg.id === userMessageId || !msg.id.startsWith('temp-')));
+      exchangeAssistantIdRef.current.delete(exchangeId);
+      setMessages((prev) => prev.filter((msg) =>
+        msg.id === userMessageId || !msg.id.startsWith('assistant-')
+      ));
     }
   };
+
+  // ─── Render ───
 
   if (authLoading) {
     return (

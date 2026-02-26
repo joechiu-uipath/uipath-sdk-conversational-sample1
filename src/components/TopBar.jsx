@@ -37,10 +37,10 @@ export default function TopBar({
 
         <select
           className="topbar-select"
-          value={selectedConversation?.conversationId || ''}
+          value={selectedConversation?.id || selectedConversation?.conversationId || ''}
           onChange={(e) => {
             const conversation = conversations.find(
-              (c) => c.conversationId === e.target.value
+              (c) => (c.id || c.conversationId) === e.target.value
             );
             onConversationChange(conversation);
           }}
@@ -51,11 +51,17 @@ export default function TopBar({
               ? 'Loading conversations...'
               : 'Select a conversation'}
           </option>
-          {conversations.map((conv) => (
-            <option key={conv.conversationId} value={conv.conversationId}>
-              {conv.label || conv.conversationId}
-            </option>
-          ))}
+          {conversations.map((conv) => {
+            const convId = conv.id || conv.conversationId;
+            const displayLabel = conv.label && conv.label.trim()
+              ? conv.label
+              : `Chat ${convId.substring(0, 8)}...`;
+            return (
+              <option key={convId} value={convId}>
+                {displayLabel}
+              </option>
+            );
+          })}
         </select>
 
         <button
